@@ -104,6 +104,13 @@ def do_import(config):
 
     return deferred_actions
 
+def do_verify(config):
+    deferred_actions = []
+    if config.verify_hss:
+        deferred_actions.extend(hss.verify_data(config))
+
+    return deferred_actions
+
 def process(config):
     if config.mode == "status":
         return do_status(config)
@@ -111,4 +118,6 @@ def process(config):
         return do_checkout(config)
     elif config.mode == "import":
         return do_import(config)
+    elif config.mode == "verify":
+        return do_verify(config)
     return None

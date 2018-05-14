@@ -3,6 +3,8 @@ import sys
 import argparse
 import ConfigParser
 import smwflow
+import smwflow.search
+import smwflow.variables
 
 class Config(object):
     def __init__(self):
@@ -15,7 +17,8 @@ class Config(object):
             'smwconf': '%s/smwconf' % smwflow.DEFAULT_GIT_BASEPATH,
             'secured': '%s/secured' % smwflow.DEFAULT_GIT_BASEPATH,
             'zypper': '%s/zypper' % smwflow.DEFAULT_GIT_BASEPATH,
-            'system': system
+            'system': system,
+            'password_file': ""
         }
 
         config_fname = '%s/smwflow.conf' % smwflow.CONFIG_PATH
@@ -25,6 +28,7 @@ class Config(object):
         self.secured = parser.get('smwflow', 'secured')
         self.zypper = parser.get('smwflow', 'zypper')
         self.system = parser.get('smwflow', 'system')
+        self.password_file = parser.get('smwflow', 'password_file')
 
 class ArgCheckoutBranchAction(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
@@ -40,11 +44,25 @@ class ArgCheckoutBranchAction(argparse.Action):
 
 class ArgConfig(object):
     def __init__(self, config, argv):
+        parser = self.__get_parser(config)
+        self.values = parser.parse_args(argv)
+        if not config.password_file:
+            config.password_file = os.path.join(config.secured, 'ansible_vault/ansible.hash')
+        if os.path.exists(config.password_file):
+            with open(config['password_file'], 'r') as rfp:
+                password = rfp.read().strip()
+                vaultobj = vault.VaultLib(password)
+                setattr(self.values, 'vaultobj', vaultobj)     
+        variables = smwflow.variables.read_vars(self.values, 'vars', 'vars')
+        setattr(self.values, "global_vars", variables)
+
+    def __get_parser(self, config):
         parser = argparse.ArgumentParser(description='smwflow git-based Cray systems management')
         parser.add_argument('--smwconf', default=config.smwconf, help='path to the primary smw configuration git repo')
         parser.add_argument('--secured', default=config.secured, help='path to the secured smw configuration git repo')
         parser.add_argument('--zypper', default=config.zypper, help='path to zypper git-lfs repo')
         parser.add_argument('--system', default=config.system, help='system name')
+        parser.add_argument('--password_file', default=config.password_file, help='Ansible vault password file')
         subparsers = parser.add_subparsers(help='smwflow command')
 
         p_status = subparsers.add_parser('status', help='smwflow status')
@@ -128,5 +146,4 @@ class ArgConfig(object):
         p_import_cfgset.set_defaults(import_cfgset=True)
         p_import_cfgset.add_argument('--type', help='configset type', choices=['cle', 'global'], default='cle', dest='cfgset_type')
         p_import_cfgset.add_argument('cfgset_name', help='configset name')
-      
-        self.values = parser.parse_args(argv)
+        return parser
