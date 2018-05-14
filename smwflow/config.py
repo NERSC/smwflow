@@ -100,7 +100,7 @@ class ArgConfig(object):
         p_update_cfgset.add_argument('cfgset_name', help='configset name')
 
         p_verify = subparsers.add_parser('verify', help='verify smw configurations')
-        p_verify.set_defaults(mode='verify')
+        p_verify.set_defaults(mode='verify', verify_imps=False, verify_hss=False, verify_basesmw=False, verify_both_cfgset=False)
         p_verify_sp = p_verify.add_subparsers(help='verify smw configurations')
         p_verify_all = p_verify_sp.add_parser('all', help='verify all smw configurations')
         p_verify_all.set_defaults(verify_imps=True, verify_hss=True, verify_basesmw=True, verify_both_cfgset=True)
@@ -128,7 +128,7 @@ class ArgConfig(object):
         p_create_cfgset.add_argument('cfgset_name', help='configset name')
 
         p_import = subparsers.add_parser('import', help='import smw configurations into git repos, will need to add and commit changes following operation')
-        p_import.set_defaults(mode='import')
+        p_import.set_defaults(mode='import', import_imps=False, import_hss=False, import_basesmw=False, import_both_cfgset=False)
         p_import_sp = p_import.add_subparsers(help='import smw configurations')
         p_import_all = p_import_sp.add_parser('all', help='import all smw configurations')
         p_import_all.set_defaults(import_imps=True, import_hss=True, import_basesmw=True, import_both_cfgset=True)

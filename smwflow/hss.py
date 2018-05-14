@@ -180,7 +180,7 @@ def import_data(config):
         except OSError, e:
             if e.errno != errno.EEXIST:
                 raise e
-        repo_hss = os.path.join(repo_path, 'hss', config.system)
+        repo_hss = os.path.join(repo_path, 'hss', '%s_hss' % config.system)
         try:
             os.mkdir(repo_hss, 0755)
         except OSError, e:
@@ -209,6 +209,8 @@ def verify_data(config):
     objs = smwflow.search.get_objects(config, 'hss', 'hss')
     hss_vars = smwflow.variables.read_vars(config, 'hss', 'vars')
     for key in config.global_vars:
+        if key in hss_vars:
+            continue
         hss_vars[key] = config.global_vars[key]
 
     for key in objs:

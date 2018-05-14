@@ -5,6 +5,7 @@ import sys
 import subprocess
 import re
 import smwflow.hss as hss
+import smwflow.imps as imps
 
 def _get_git_head_rev(path):
     
@@ -101,6 +102,8 @@ def do_import(config):
     deferred_actions = []
     if config.import_hss:
         deferred_actions.extend(hss.import_data(config))
+    if config.import_imps:
+        deferred_actions.extend(imps.import_data(config))
 
     return deferred_actions
 
@@ -108,6 +111,8 @@ def do_verify(config):
     deferred_actions = []
     if config.verify_hss:
         deferred_actions.extend(hss.verify_data(config))
+    if config.verify_imps:
+        deferred_actions.extend(imps.verify_data(config))
 
     return deferred_actions
 

@@ -19,7 +19,7 @@ def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf','secured
         gentype_arr.append(subtype)
         systype_arr.append(subtype)
     gentype_arr.append(objtype)
-    gentype_arr.append(objtype)
+    systype_arr.append(objtype)
 
     gentype = '_'.join(gentype_arr)
     systype = '_'.join(systype_arr)
