@@ -18,7 +18,8 @@ class Config(object):
             'secured': '%s/secured' % smwflow.DEFAULT_GIT_BASEPATH,
             'zypper': '%s/zypper' % smwflow.DEFAULT_GIT_BASEPATH,
             'system': system,
-            'password_file': ""
+            'password_file': "",
+            'configset_path': '/var/opt/cray/imps/config/sets'
         }
 
         config_fname = '%s/smwflow.conf' % smwflow.CONFIG_PATH
@@ -29,6 +30,7 @@ class Config(object):
         self.zypper = parser.get('smwflow', 'zypper')
         self.system = parser.get('smwflow', 'system')
         self.password_file = parser.get('smwflow', 'password_file')
+        self.configset_path = parser.get('smwflow', 'configset_path')
 
 class ArgCheckoutBranchAction(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
