@@ -34,7 +34,7 @@ def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf','secured
 
     return [x for x in paths if os.path.exists(x) and os.access(x, os.R_OK)]
 
-def get_objects(config, maintype, objtype, subtype=None, repos=('smwconf','secured')):
+def get_objects(config, maintype, objtype, subtype=None, extra_obj_parameters={}, repos=('smwconf','secured')):
     """
     Get a dictionary of objects, annorated with the most relevant manifest
     entry, if it exists.
@@ -52,5 +52,8 @@ def get_objects(config, maintype, objtype, subtype=None, repos=('smwconf','secur
                 if filename in manifest:
                     for key in manifest[filename]:
                         output[filename][key] = manifest[filename][key]
-        
+                if filename in extra_obj_parameters:
+                    for key in extra_obj_parameters[filename]:
+                        output[filename][key] = extra_obj_parameters[filename][key]
+         
     return output

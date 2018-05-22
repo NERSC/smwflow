@@ -5,6 +5,7 @@ import errno
 import smwflow.compare
 import smwflow.manifest
 import smwflow.search
+import smwflow.smwfile
 import smwflow.variables
 import codecs
 from jinja2 import Template
@@ -202,43 +203,76 @@ def import_data(config):
         deferred_actions.append("Add/Commit HSS items in %s" % repo_path)
     return deferred_actions
 
+def _git_hss_object(config, obj, hss_vars):
+    git_data = None
+    with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
+        data = rfp.read()
+        template = Template(data)
+        git_data = template.render(hss_vars)
+    return git_data
+
+def _smw_hss_object(config, obj):
+    if not os.path.exists(obj['smwpath']):
+        return None
+
+    smw_data = None
+    with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
+        smw_data = rfp.read()
+    return smw_data
+
+def _valid_hss_object(config, obj):
+    if 'smwpath' not in obj:
+        print 'Skipping git hss file %s since it does not have an smwpath in the manifest' % key
+        return False
+    return True
+
+def _verify_hss_object(config, obj, git_data, smw_data):
+    if not git_data or not smw_data:
+        print 'Failed to read git or smw data for hss file %s (smw: %s)' % (key, obj['smwpath'])
+        return None
+    issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
+    return issues
 
 def verify_data(config):
     deferred_actions = []
 
     objs = smwflow.search.get_objects(config, 'hss', 'hss')
-    hss_vars = smwflow.variables.read_vars(config, 'hss', 'vars')
-    for key in config.global_vars:
-        if key in hss_vars:
-            continue
-        hss_vars[key] = config.global_vars[key]
-
+    hss_vars = smwflow.variables.read_vars(config, 'hss', 'vars', None, config.global_vars)
     for key in objs:
         obj = objs[key]
-        if 'smwpath' not in obj:
-            print 'Skipping git hss file %s since it does not have an smwpath in the manifest' % key
+        if not _valid_hss_object(config, obj):
             continue
 
-        if not os.path.exists(obj['smwpath']):
-            print 'git hss file %s does not exist as %s on SMW' % (key, obj['smwpath'])
-            continue
-        git_data = None
-        smw_data = None
-        with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
-            data = rfp.read()
-            template = Template(data)
-            git_data = template.render(hss_vars)
-        with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
-            smw_data = rfp.read()
+        git_data = _git_hss_object(config, obj, hss_vars)
+        smw_data = _smw_hss_object(config, obj)
 
-        if not git_data or not smw_data:
-            print 'Failed to read git or smw data for hss file %s (smw: %s)' % (key, obj['smwpath'])
-            continue
-        issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
-        if len(issues) > 0:
+        issues = _verify_hss_object(config, obj, git_data, smw_data)
+        if type(issues) is list and len(issues) > 0:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
             print ""
+        if not smwflow.smwfile.verifyattributes(config, obj):
+            print 'WARNING: file on smw %s has incorrect ownership or mode' % obj['smwpath']
 
+    return deferred_actions
+
+def update_data(config):
+    deferred_actions = []
+    objs = smwflow.search.get_objects(config, 'hss', 'hss')
+    hss_vars = smwflow.variables.read_vars(config, 'hss', 'hss', None, config.global_vars)
+
+    for key in objs:
+        obj = objs[key]
+        if not _valid_hss_object(config, obj):
+            continue
+        git_data = _git_hss_object(config, obj, hss_vars)
+        smw_data = _smw_hss_object(config, obj)
+
+        issues = _verify_hss_object(config, obj, git_data, smw_data)
+        if issues is None or len(issues) > 0:
+            print "Updating HSS component %s in %s" % (obj['name'], obj['smwpath'])
+            with codecs.open(obj['smwpath'], mode='w', encoding='utf-8') as wfp:
+                wfp.write(git_data)
+            smwflow.smwfile.setattributes(config, obj)
     return deferred_actions

@@ -32,6 +32,9 @@ class Manifest(object):
     def __getitem__(self, key):
         return self.__curr__[key]
 
+    def keys(self):
+        return self.__curr__.keys()
+
     def __setitem__(self, key, value):
         self.__curr__[key] = value
 

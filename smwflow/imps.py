@@ -5,6 +5,7 @@ import errno
 import smwflow.compare
 import smwflow.manifest
 import smwflow.search
+import smwflow.smwfile
 import smwflow.variables
 import codecs
 from jinja2 import Template
@@ -76,43 +77,78 @@ def import_data(config):
         deferred_actions.append("Add/Commit IMPS items in %s" % repo_path)
     return deferred_actions
 
+def _valid_imps_object(config, obj):
+    if 'smwpath' not in obj:
+        print 'Skipping git imps file %s since it does not have an smwpath in the manifest' % key
+        return False
+    return True
+
+def _git_imps_object(config, obj, imps_vars):
+    git_data = None
+    with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
+        data = rfp.read()
+        template = Template(data)
+        git_data = template.render(imps_vars)
+    return git_data
+
+def _smw_imps_object(config, obj):
+    if not os.path.exists(obj['smwpath']):
+        print 'git imps file %s does not exist as %s on SMW' % (key, obj['smwpath'])
+        return None
+    smw_data = None
+    with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
+        smw_data = rfp.read()
+    return smw_data
+
+def _verify_imps_object(config, obj, git_data, smw_data):
+    if not git_data or not smw_data:
+        print 'Failed to read git or smw data for imps file %s (smw: %s)' % (key, obj['smwpath'])
+        return None
+    issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
+    return issues
 
 def verify_data(config):
     deferred_actions = []
 
     objs = smwflow.search.get_objects(config, 'imps', 'imps')
-    imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars')
-    for key in config.global_vars:
-        if key in imps_vars:
-            continue
-        imps_vars[key] = config.global_vars[key]
+    imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, config.global_vars)
 
     for key in objs:
         obj = objs[key]
-        if 'smwpath' not in obj:
-            print 'Skipping git imps file %s since it does not have an smwpath in the manifest' % key
+        if not _valid_imps_object(config, obj):
             continue
 
-        if not os.path.exists(obj['smwpath']):
-            print 'git imps file %s does not exist as %s on SMW' % (key, obj['smwpath'])
-            continue
-        git_data = None
-        smw_data = None
-        with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
-            data = rfp.read()
-            template = Template(data)
-            git_data = template.render(imps_vars)
-        with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
-            smw_data = rfp.read()
+        git_data = _git_imps_object(config, obj, imps_vars)
+        smw_data = _smw_imps_object(config, obj)
 
-        if not git_data or not smw_data:
-            print 'Failed to read git or smw data for imps file %s (smw: %s)' % (key, obj['smwpath'])
-            continue
-        issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
+        issues = _verify_imps_object(config, obj, git_data, smw_data)
         if len(issues) > 0:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
             print ""
+        if not smwflow.smwfile.verifyattributes(config, obj):
+            print 'WARNING: file on smw %s has incorrect ownership or mode' % obj['smwpath']
 
+    return deferred_actions
+
+def update_data(config):
+    deferred_actions = []
+    objs = smwflow.search.get_objects(config, 'imps', 'imps')
+    imps_vars = smwflow.variables.read_vars(config, 'imps', 'imps', None, config.global_vars)
+
+    for key in objs:
+        obj = objs[key]
+        if not _valid_imps_object(config, obj):
+            continue
+        git_data = _git_imps_object(config, obj, imps_vars)
+        smw_data = _smw_imps_object(config, obj)
+
+        issues = _verify_imps_object(config, obj, git_data, smw_data)
+        if issues is None or len(issues) > 0:
+            print "Updating IMPS component %s in %s" % (obj['name'], obj['smwpath'])
+            with codecs.open(obj['smwpath'], mode='w', encoding='utf-8') as wfp:
+                wfp.write(git_data)
+        if not smwflow.smwfile.verifyattributes(config, obj):
+            smwflow.smwfile.setattributes(config, obj)
     return deferred_actions

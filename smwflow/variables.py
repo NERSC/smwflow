@@ -2,7 +2,7 @@ import os
 import sys
 import smwflow.search
 
-def read_vars(config, maintype, objtype, subtype=None):
+def read_vars(config, maintype, objtype, subtype=None, parentvars=None):
     vars_paths = smwflow.search.gen_paths(config, maintype, objtype, subtype)
     variables = {}
     for vars_path in vars_paths:
@@ -25,4 +25,10 @@ def read_vars(config, maintype, objtype, subtype=None):
                     continue
                 for key in data:
                     variables[key] = data[key]
+    if parentvars:
+        for key in parentvars:
+            if key not in variables:
+                variabels[key] = parentvars[key]
+
     return variables
+

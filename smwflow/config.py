@@ -64,6 +64,7 @@ class ArgConfig(object):
         parser.add_argument('--secured', default=config.secured, help='path to the secured smw configuration git repo')
         parser.add_argument('--zypper', default=config.zypper, help='path to zypper git-lfs repo')
         parser.add_argument('--system', default=config.system, help='system name')
+        parser.add_argument('--configset_path', default=config.configset_path, help='root path to config sets')
         parser.add_argument('--password_file', default=config.password_file, help='Ansible vault password file')
         subparsers = parser.add_subparsers(help='smwflow command')
 
@@ -79,12 +80,12 @@ class ArgConfig(object):
         p_checkout.add_argument('branch', help='name of branch to use', action=ArgCheckoutBranchAction)
 
         p_update = subparsers.add_parser('update', help='update smw configurations')
-        p_update.set_defaults(mode='update')
+        p_update.set_defaults(mode='update', update_hss=False, update_basesmw=False, update_cfgset=False, update_both_cfgset=False, update_imps=False, update_zypper=False)
         p_update.add_argument('--dry-run', help='do not actually modify anything, just pretend', default=False, action='store_true')
         p_update_sp = p_update.add_subparsers(help='update smw configurations from smw')
 
         p_update_all = p_update_sp.add_parser('all', help='update all smw possible smw configurations')
-        p_update_all.set_defaults(update_imps=True, update_hss=True, update_basesmw=True, update_both_cfgset=True)
+        p_update_all.set_defaults(update_imps=True, update_hss=True, update_basesmw=True, update_both_cfgset=True, update_cfgset=True)
         p_update_all.add_argument('--cle_configset', default='p0', help='name of cle configset')
 
         p_update_imps = p_update_sp.add_parser('imps', help='update image management and provisioning system (imps)')
@@ -101,12 +102,18 @@ class ArgConfig(object):
         p_update_cfgset.add_argument('--type', help='configset type', choices=['cle', 'global'], default='cle', dest='cfgset_type')
         p_update_cfgset.add_argument('cfgset_name', help='configset name')
 
+        p_update_zypper = p_update_sp.add_parser('zypper', help='update zypper repos')
+        p_update_zypper.set_defaults(update_zypper=True)
+        p_update_zypper.add_argument('--all', help='setup all git-defined zypper repos', default=False, action='store_true', dest='update_all_zypper')
+        p_update_zypper.add_argument('zypper_repos', nargs='*', help='specific zypper repos to update')
+
         p_verify = subparsers.add_parser('verify', help='verify smw configurations')
-        p_verify.set_defaults(mode='verify', verify_imps=False, verify_hss=False, verify_basesmw=False, verify_both_cfgset=False)
+        p_verify.set_defaults(mode='verify', verify_imps=False, verify_hss=False, verify_basesmw=False, verify_cfgset=False, verify_both_cfgset=False, verify_zypper=False, verify_all_zypper=False)
         p_verify_sp = p_verify.add_subparsers(help='verify smw configurations')
         p_verify_all = p_verify_sp.add_parser('all', help='verify all smw configurations')
         p_verify_all.set_defaults(verify_imps=True, verify_hss=True, verify_basesmw=True, verify_both_cfgset=True)
         p_verify_all.add_argument('--cle_configset', default='p0', help='name of cle configset') 
+
         p_verify_imps = p_verify_sp.add_parser('imps', help='verify image management and provisioning system (imps)')
         p_verify_imps.set_defaults(verify_imps=True)
 
@@ -120,9 +127,14 @@ class ArgConfig(object):
         p_verify_cfgset.set_defaults(verify_cfgset=True)
         p_verify_cfgset.add_argument('--type', help='configset type', choices=['cle', 'global'], default='cle', dest='cfgset_type')
         p_verify_cfgset.add_argument('cfgset_name', help='configset name')
+
+        p_verify_zypper = p_verify_sp.add_parser('zypper', help='verify zypper repos')
+        p_verify_zypper.set_defaults(verify_zypper=True)
+        p_verify_zypper.add_argument('--all', help='verify all git-defined zypper repos', default=False, action='store_true', dest='verify_all_zypper')
+        p_verify_zypper.add_argument('zypper_repos', nargs='*', help='specific zypper repos to verify')
         
         p_create = subparsers.add_parser('create', help='create new smw configurations')
-        p_create.set_defaults(mode='create')
+        p_create.set_defaults(mode='create', create_cfgset=False, create_zypper=False)
         p_create_sp = p_create.add_subparsers(help='create smw configurations')
         p_create_cfgset = p_create_sp.add_parser('cfgset', help='create configset')
         p_create_cfgset.set_defaults(create_cfgset=True)

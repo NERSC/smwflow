@@ -119,6 +119,13 @@ def do_verify(config):
 
     return deferred_actions
 
+def do_update(config):
+    deferred_actions = []
+    if config.update_hss:
+        deferred_actions.extend(hss.update_data(config))
+    if config.update_imps:
+        deferred_actions.extend(imps.update_data(config))
+
 def process(config):
     if config.mode == "status":
         return do_status(config)
@@ -128,4 +135,6 @@ def process(config):
         return do_import(config)
     elif config.mode == "verify":
         return do_verify(config)
+    elif config.mode == "update":
+        return do_update(config)
     return None
