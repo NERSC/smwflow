@@ -155,8 +155,10 @@ def basic_compare(config, obj_data, git_data, smw_data):
     filetype = guess_type(config, obj_data)
 
     if filetype == 'raw':
+        l_git_data = git_data.split()
+        l_smw_data = smw_data.split()
         diff = difflib.Differ()
-        res = list(diff.compare(git_data, smw_data))
+        res = list(diff.compare(l_git_data, l_smw_data))
         final = []
         for line in res:
             if line[0] == '-':
