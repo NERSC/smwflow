@@ -43,11 +43,14 @@ def get_objects(config, maintype, objtype, subtype=None, extra_obj_parameters={}
     paths = gen_paths(config, maintype, objtype, subtype, repos)
     for path in paths:
         manifest = smwflow.manifest.Manifest(path)
+        rpath = os.path.realpath(path)
+        start_idx = len(rpath) + 1
 
-        for (dirpath, dirnames, filenames) in os.walk(path):
+        for (dirpath, dirnames, filenames) in os.walk(rpath):
             for filename in filenames:
                 if filename == '.smwflow.manifest.yaml':
                     continue
+                filename = os.path.join(dirpath, filename)[start_idx:]
                 output[filename] = { 'fullpath': os.path.join(dirpath, filename) }
                 if filename in manifest:
                     for key in manifest[filename]:
