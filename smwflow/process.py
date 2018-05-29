@@ -1,7 +1,6 @@
 """
 """
 import os
-import sys
 import subprocess
 import re
 import smwflow.hss as hss
@@ -9,22 +8,21 @@ import smwflow.imps as imps
 import smwflow.cfgset as cfgset
 
 def _get_git_head_rev(path):
-    
     command = ["git", "-C", path, "rev-parse", "HEAD"]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    stdout,stderr = proc.communicate()
+    stdout, _ = proc.communicate()
     return stdout.strip()
 
 def _get_git_branch(path):
     command = ["git", "-C", path, "status", "-s", "--porcelain", "-b", "-u", "no"]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    stdout, stderr = proc.communicate()
+    stdout, _ = proc.communicate()
     stdout = stdout.strip()
     loc = stdout.find('...')
     if loc >= 0:
         stdout = stdout[:loc]
 
-    match = re.match('##\s+(.*)(\.\.\.(.*))?', stdout.strip())
+    match = re.match(r'##\s+(.*)(\.\.\.(.*))?', stdout.strip())
     if match:
         return match.groups()[0]
     return None
@@ -33,29 +31,29 @@ def _checkout_git_branch(path, branch, do_pull=False):
     have_remote = False
     command = ['git', '-C', path, 'remote']
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    stdout, stderr = proc.communicate()
-    if len(stdout.strip()) > 0:
+    stdout, _ = proc.communicate()
+    if stdout.strip():
         have_remote = True
     if do_pull and have_remote:
         command = ['git', '-C', path, 'fetch']
         proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-        stdout, stderr = proc.communicate()
+        stdout, _ = proc.communicate()
         if proc.returncode != 0:
             raise "Failed git-fetch in %s" % path
-    
+
     command = ['git', '-C', path, 'checkout', branch]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    stdout, stderr  = proc.communicate()
+    stdout, _ = proc.communicate()
     if proc.returncode != 0:
         raise "Failed to checkout branch %s in %s" % (branch, path)
 
     if do_pull and have_remote:
         command = ['git', '-C', path, 'pull']
         proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-        stdout, stderr = proc.communicate()
+        stdout, _ = proc.communicate()
         if proc.returncode != 0:
             raise "Failed to perform git-pull in %s" % path
-    
+
     return proc.returncode
 
 def do_status(config):
@@ -86,16 +84,16 @@ def do_status(config):
     return []
 
 def do_checkout(config):
-    rc = 0
+    retcode = 0
     if os.access(config.smwconf, os.R_OK):
         print "\nStaring checkout on smwconf repo:"
-        rc += _checkout_git_branch(config.smwconf, config.smwconf_branch, config.checkout_pull)
+        retcode += _checkout_git_branch(config.smwconf, config.smwconf_branch, config.checkout_pull)
     if os.access(config.secured, os.R_OK):
         print "\nStaring checkout on secured repo:"
-        rc += _checkout_git_branch(config.secured, config.secured_branch, config.checkout_pull)
+        retcode += _checkout_git_branch(config.secured, config.secured_branch, config.checkout_pull)
     if os.access(config.zypper, os.R_OK):
         print "\nStaring checkout on zypper repo:"
-        rc += _checkout_git_branch(config.zypper, config.zypper_branch, config.checkout_pull)
+        retcode += _checkout_git_branch(config.zypper, config.zypper_branch, config.checkout_pull)
     return []
 
 
@@ -134,16 +132,17 @@ def do_create(config):
     return deferred_actions
 
 def process(config):
+    ret = None
     if config.mode == "status":
-        return do_status(config)
+        ret = do_status(config)
     elif config.mode == "checkout":
-        return do_checkout(config)
+        ret = do_checkout(config)
     elif config.mode == "import":
-        return do_import(config)
+        ret = do_import(config)
     elif config.mode == "verify":
-        return do_verify(config)
+        ret = do_verify(config)
     elif config.mode == "update":
-        return do_update(config)
+        ret = do_update(config)
     elif config.mode == "create":
-        return do_create(config)
-    return None
+        ret = do_create(config)
+    return ret
