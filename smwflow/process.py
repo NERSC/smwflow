@@ -125,6 +125,13 @@ def do_update(config):
         deferred_actions.extend(hss.update_data(config))
     if config.update_imps:
         deferred_actions.extend(imps.update_data(config))
+    return deferred_actions
+
+def do_create(config):
+    deferred_actions = []
+    if config.create_cfgset:
+        deferred_actions.extend(cfgset.create(config))
+    return deferred_actions
 
 def process(config):
     if config.mode == "status":
@@ -137,4 +144,6 @@ def process(config):
         return do_verify(config)
     elif config.mode == "update":
         return do_update(config)
+    elif config.mode == "create":
+        return do_create(config)
     return None

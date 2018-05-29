@@ -2,12 +2,15 @@ import os
 import sys
 import smwflow.search
 
-def read_vars(config, maintype, objtype, subtype=None, parentvars=None):
+def read_vars(config, maintype, objtype, subtype=None, parentvars=None, system=None):
+    if not system:
+        system = config.system
+
     vars_paths = smwflow.search.gen_paths(config, maintype, objtype, subtype)
     variables = {}
     for vars_path in vars_paths:
-        unencrypted_vars_path = os.path.join(vars_path, '%s.yaml' % config.system)
-        encrypted_vars_path = os.path.join(vars_path, '%s_secrets.yaml' % config.system)
+        unencrypted_vars_path = os.path.join(vars_path, '%s.yaml' % system)
+        encrypted_vars_path = os.path.join(vars_path, '%s_secrets.yaml' % system)
         if os.path.exists(unencrypted_vars_path):
             with open(unencrypted_vars_path, 'r') as rfp:
                 data = yaml.load(rfp.read())

@@ -19,7 +19,9 @@ class Config(object):
             'zypper': '%s/zypper' % smwflow.DEFAULT_GIT_BASEPATH,
             'system': system,
             'password_file': "",
-            'configset_path': '/var/opt/cray/imps/config/sets'
+            'configset_path': '/var/opt/cray/imps/config/sets',
+            'partition': 'p0',
+            'platform_json': None,
         }
 
         config_fname = '%s/smwflow.conf' % smwflow.CONFIG_PATH
@@ -31,6 +33,8 @@ class Config(object):
         self.system = parser.get('smwflow', 'system')
         self.password_file = parser.get('smwflow', 'password_file')
         self.configset_path = parser.get('smwflow', 'configset_path')
+        self.partition = parser.get('smwflow', 'partition')
+        self.platform_json = parser.get('smwflow', 'platform_json')
 
 class ArgCheckoutBranchAction(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
@@ -161,3 +165,27 @@ class ArgConfig(object):
         p_import_cfgset.add_argument('--type', help='configset type', choices=['cle', 'global'], default='cle', dest='cfgset_type')
         p_import_cfgset.add_argument('cfgset_name', help='configset name')
         return parser
+
+def parse_platform(config):
+    '''Reads p0.platform.json and generates a dictionary mapping the platform
+       name to its constituent host cnames.
+
+       Assumes that each platform key begins with "platform:" and each value
+       is a list of cnames. 
+
+       TODO: consider using rsm.node_groups.resolvers.cle instead
+       '''
+    
+    platform_json = config.platform_json
+    if not platform_json:
+        platform_json = os.path.join(config.configset_path, 'global/files/node_groups/platforms/p0.platform.json')
+
+    with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as fp:
+        platform = json.load(fp)
+
+    platform = {}
+    for p_name, p_nodes in p0_platform.items():
+        if p_name.startswith('platform:'):
+            platform[p_name] = [ p_node for p_node in p_nodes ]
+
+    return platform

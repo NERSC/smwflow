@@ -1,3 +1,5 @@
+## Author: Douglas Jacobsen <dmjacobsen@lbl.gov>
+
 import os
 import sys
 import stat
@@ -9,6 +11,7 @@ import smwflow.search
 import smwflow.smwfile
 import smwflow.variables
 import codecs
+import rsm.hss
 from jinja2 import Template
 
 
@@ -19,6 +22,63 @@ MANAGED_CFGSET_CONFIG = {
     'cray_lmt_config.yaml': { 'mode': 0600 },
     'cray_local_users_config.yaml': { 'mode': 0600 },
 }
+
+class cfgset(object):
+    def __init__(self, config, ctype, cname):
+        self.config = config
+        self.cfgset_type = ctype
+        self.cfgset_name = cname
+        self.routermap = {}
+        routermap = rsm.hss.RouterMap(self.config.partition)
+        for node in routermap:
+            self.routermap[node.cname] = node
+
+    def _render_obj(self, obj, objtype_vars):
+        git_data = None
+        with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
+            data = rfp.read()
+            template = Template(data)
+            git_data = template.render(objtype_vars)
+        return git_data
+
+    def _simple_worksheet_config(self, data):
+        ret = {}
+        for key in data:
+            subkeys = key.split(".")
+            obj = ret
+            parentobj = None
+            for skey in subkeys:
+                if skey not in obj:
+                    obj[skey] = {}
+                parentobj = obj
+                obj = obj[skey]
+            parentobj[subkeys[-1]] = data[key]
+        return ret
+
+    def parse_network(self, system=None):
+        if not system:
+            system = config['system']
+
+        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets', self.cfgset_type, system=system)
+        global_vars = smwflow.variables.read_vars(self.values, 'vars', 'vars', system=system)
+        imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, global_vars, system=system)
+        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps', 'worksheet_vars', ctype, imps_vars, system=system)
+
+        net_worksheet = self._render_obj(objs['cray_net_worksheet.yaml'], worksheet_vars)
+        data = yaml.load(net_worksheet)
+        return _simple_worksheet_config(data)
+
+    def parse_nodegroups(self, system=None):
+        if not system:
+            system = config['system']
+        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets', self.cfgset_type, system=system)
+        global_vars = smwflow.variables.read_vars(self.values, 'vars', 'vars', system=system)
+        imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, global_vars, system=system)
+        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps', 'worksheet_vars', ctype, imps_vars, system=system)
+
+        worksheet = self._render_obj(objs['cray_node_groups_worksheet.yaml'], worksheet_vars)
+        data = yaml.load(worksheet)
+        return _simple_worksheet_config(data)
 
 def import_data(config):
     deferred_actions = []
@@ -34,7 +94,7 @@ def import_data(config):
             if e.errno != errno.EEXIST:
                 raise e
         for objtype in ['worksheets','ansible','config', 'dist', 'files']:
-            repo_imps = os.path.join(repo_path, 'imps', '%s_worksheets' % config.system)
+            repo_imps = os.path.join(repo_path, 'imps', '%s_%s' % (config.system, objtype))
             try:
                 os.mkdir(repo_imps, 0755)
             except OSError, e:
@@ -267,6 +327,130 @@ def _verify_configs(config, imps_vars, ctype, cname):
 
     return deferred_actions
 
+def _verify_ansible(config, imps_vars, ctype, cname):
+    cfgset_ansible_path = os.path.join(config.configset_path, cname, 'ansible')
+    cfgset_ansible_path = os.path.realpath(cfgset_ansible_path)
+
+    # first, walk the cfgset and build a list of all existing paths
+    start_idx = len(cfgset_ansible_path) + 1
+    cfgset_ansible = {}
+    for (dirpath, dirnames, filenames) in os.walk(cfgset_ansible_path):
+        for path in filenames:
+            relpath =  os.path.join(dirpath, path)[start_idx:]
+            cfgset_ansible[relpath] = { 'match': False, 'checked': False, 'smwpath': os.path.join(dirpath, path) }
+
+    # next, walk the repos and discover a list of objects
+    objs = smwflow.search.get_objects(config, 'imps', 'ansible', ctype)
+
+    # execute any discovered ansible smwflow plugins, generate content in-memory
+    ## TODO
+
+    smw_keys = set(cfgset_ansible.keys())
+    git_keys = set(objs.keys())
+
+    smwonly_keys = smw_keys - git_keys
+    gitonly_keys = git_keys - smw_keys
+    common_keys = smw_keys.intersection(git_keys)
+
+    if len(smwonly_keys) > 0:
+        print "ansible files only on smw: ", smwonly_keys
+        print
+
+    if len(gitonly_keys) > 0:
+        print  "ansible files only in git: ", gitonly_keys
+        print
+
+    for key in common_keys:
+        obj = objs[key]
+        obj['smwpath'] = cfgset_ansible[key]['smwpath']
+        smw_value = None
+        git_value = None
+
+        with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
+            git_value = rfp.read()
+        with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
+            smw_value = rfp.read()
+        issues = smwflow.compare.basic_compare(config, obj, git_value, smw_value)
+        if len(issues) > 0:
+            print "DIFFERENCES FOUND IN %s" % obj['name']
+            for item in issues:
+                print item
+            print ""
+
+    return []
+
+def _verify_files(config, imps_vars, ctype, cname):
+    cfgset_files_path = os.path.join(config.configset_path, cname, 'files')
+    cfgset_files_path = os.path.realpath(cfgset_files_path)
+
+    # first, walk the cfgset and build a list of all existing paths
+    start_idx = len(cfgset_files_path) + 1
+    cfgset_files = {}
+    for (dirpath, dirnames, filenames) in os.walk(cfgset_files_path):
+        for path in filenames:
+            relpath =  os.path.join(dirpath, path)[start_idx:]
+            cfgset_files[relpath] = { 'match': False, 'checked': False, 'smwpath': os.path.join(dirpath, path) }
+
+    # next, walk the repos and discover a list of objects
+    objs = smwflow.search.get_objects(config, 'imps', 'files', ctype)
+
+    # execute any discovered files smwflow plugins, generate content in-memory
+    ## TODO
+
+    smw_keys = set(cfgset_files.keys())
+    git_keys = set(objs.keys())
+
+    smwonly_keys = smw_keys - git_keys
+    gitonly_keys = git_keys - smw_keys
+    common_keys = smw_keys.intersection(git_keys)
+
+    if len(smwonly_keys) > 0:
+        print "files only on smw: ", smwonly_keys
+        print
+
+    if len(gitonly_keys) > 0:
+        print  "files only in git: ", gitonly_keys
+        print
+
+    for key in common_keys:
+        obj = objs[key]
+        obj['smwpath'] = cfgset_files[key]['smwpath']
+        smw_value = None
+        git_value = None
+
+        with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
+            git_value = rfp.read()
+        with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
+            smw_value = rfp.read()
+        issues = smwflow.compare.basic_compare(config, obj, git_value, smw_value)
+        if len(issues) > 0:
+            print "DIFFERENCES FOUND IN %s" % obj['name']
+            for item in issues:
+                print item
+            print ""
+
+    return []
+
+def _init_cfgset(config, ctype, cname, imps_vars):
+    cfgset_path = os.path.join(config.configset_path, cname)
+    if os.path.exists(cfgset_path):
+        print("cfgset path %s already exists" % cfgset_path)
+        sys.exit(1)
+
+    print("Initializing empty cfgset")
+    retc = 0
+    command = [
+        "cfgset",
+        "create",
+        "--mode=prepare",
+        "--type=%s" % ctype,
+        "--no-scripts", cname,
+    ]
+    retc = subprocess.call(command)
+    if retc != 0:
+        print("FAILED to init cfgset %s" % cname)
+        sys.exit(1)
+
 def verify_data(config):
     deferred_actions = []
 
@@ -278,5 +462,20 @@ def verify_data(config):
     deferred_actions.extend(_verify_worksheets(config, imps_vars, ctype, cname))
     deferred_actions.extend(_verify_configs(config, imps_vars, ctype, cname))
     deferred_actions.extend(_verify_dist_preload(config, imps_vars, ctype, cname))
+    deferred_actions.extend(_verify_ansible(config, imps_vars, ctype, cname))
+    deferred_actions.extend(_verify_files(config, imps_vars, ctype, cname))
+
+    return deferred_actions
+
+def create(config):
+    deferred_actions = []
+
+    ctype = config.cfgset_type
+    cname = config.cfgset_name
+
+    imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, config.global_vars)
+
+    ## step 1 initialize empty cfgset
+    _init_cfgset(config, ctype, cname, imps_vars)
 
     return deferred_actions

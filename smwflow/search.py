@@ -2,7 +2,7 @@ import os
 import sys
 import smwflow.manifest
 
-def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf','secured')):
+def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf','secured'), system=None):
     """
     Generate search paths where objects of given maintype/objtype/subtype may be found.
 
@@ -11,7 +11,8 @@ def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf','secured
     subtype is an objtype specific type, config sets, for example have subtypes
     of 'global' and 'cle'
     """
-    system = config.system
+    if not system:
+        system = config.system
 
     gentype_arr = []
     systype_arr = [system]
@@ -34,13 +35,15 @@ def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf','secured
 
     return [x for x in paths if os.path.exists(x) and os.access(x, os.R_OK)]
 
-def get_objects(config, maintype, objtype, subtype=None, extra_obj_parameters={}, repos=('smwconf','secured')):
+def get_objects(config, maintype, objtype, subtype=None, extra_obj_parameters={}, repos=('smwconf','secured'), system=None):
     """
     Get a dictionary of objects, annorated with the most relevant manifest
     entry, if it exists.
     """
+    if not system:
+        system = config.system
     output = {}
-    paths = gen_paths(config, maintype, objtype, subtype, repos)
+    paths = gen_paths(config, maintype, objtype, subtype=subtype, repos=repos, system=system)
     for path in paths:
         manifest = smwflow.manifest.Manifest(path)
         rpath = os.path.realpath(path)
