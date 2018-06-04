@@ -197,6 +197,8 @@ def import_data(config):
                 tgt_path = os.path.join(repo_hss, item['name'])
                 command = ['cp', item['smwpath'], tgt_path]
                 retcode = subprocess.call(command)
+                if retcode != 0:
+                    raise OSError('Failed to copy %s to %s' % (item['smwpath'], tgt_path))
                 manifest[item['name']] = item
 
         deferred_actions.extend(manifest.save())

@@ -5,25 +5,26 @@ import sys
 import stat
 import subprocess
 import errno
+import codecs
+from jinja2 import Template
+import yaml
+import rsm.hss
 import smwflow.compare
 import smwflow.manifest
 import smwflow.search
 import smwflow.smwfile
 import smwflow.variables
-import codecs
-import rsm.hss
-from jinja2 import Template
 
 
 MANAGED_CFGSET_WORKSHEET = {
 }
 
 MANAGED_CFGSET_CONFIG = {
-    'cray_lmt_config.yaml': { 'mode': 0600 },
-    'cray_local_users_config.yaml': { 'mode': 0600 },
+    'cray_lmt_config.yaml': {'mode': 0600},
+    'cray_local_users_config.yaml': {'mode': 0600},
 }
 
-class cfgset(object):
+class ConfigSet(object):
     def __init__(self, config, ctype, cname):
         self.config = config
         self.cfgset_type = ctype
@@ -42,6 +43,21 @@ class cfgset(object):
         return git_data
 
     def _simple_worksheet_config(self, data):
+        """Simple parser of Cray CMF worksheets.
+
+        Assuming a Cray CMF yaml worksheet is parsed and the resulting dict is
+        valid, this function breaks apart the complex keys into a hierarchy
+        of dictionaries to enable easy traversal of the represented data structure.
+
+        Args:
+          self (ConfigSet): reference to current class instance
+          data (dict)     : parsed and evaluated Cray CMF yaml worksheet
+
+        Returns:
+          dict containing complex representation of all keys in the worksheet.
+          e.g., worksheet cray_something.data.managed = False would be represented
+          here with ret['cray_something']['data']['managed'] = False
+        """
         ret = {}
         for key in data:
             subkeys = key.split(".")
@@ -56,50 +72,75 @@ class cfgset(object):
         return ret
 
     def parse_network(self, system=None):
-        if not system:
-            system = config['system']
+        """Parse cray_net_worksheet for specified system.
 
-        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets', self.cfgset_type, system=system)
-        global_vars = smwflow.variables.read_vars(self.values, 'vars', 'vars', system=system)
-        imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, global_vars, system=system)
-        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps', 'worksheet_vars', ctype, imps_vars, system=system)
+        Renders and produces a functional cray_net_worksheet for the specified
+        system even if it is not the current system.  This is necessary for
+        generating some configurations that have global or multi-system reach
+        (e.g., sshd).
+
+        Args:
+          self (ConfigSet): reference to current class instance
+          system (string) : string defining target system for cray_net_worksheet.
+
+        Returns:
+          a dictionary representing the keys and values in the worksheet
+          with all multipart (this.that.the.other: True) broken up into a multi
+          level dictionary (ret['this']['that']['the']['other'] = True)
+        """
+        if not system:
+            system = self.config.system
+
+        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets',
+                                          self.cfgset_type, system=system)
+        global_vars = smwflow.variables.read_vars(self.config, 'vars', 'vars', system=system)
+        imps_vars = smwflow.variables.read_vars(self.config, 'imps', 'vars', None,
+                                                global_vars, system=system)
+        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps', 'worksheet_vars',
+                                                     self.cfgset_type, imps_vars, system=system)
 
         net_worksheet = self._render_obj(objs['cray_net_worksheet.yaml'], worksheet_vars)
         data = yaml.load(net_worksheet)
-        return _simple_worksheet_config(data)
+        return self._simple_worksheet_config(data)
 
     def parse_nodegroups(self, system=None):
         if not system:
-            system = config['system']
-        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets', self.cfgset_type, system=system)
-        global_vars = smwflow.variables.read_vars(self.values, 'vars', 'vars', system=system)
-        imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, global_vars, system=system)
-        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps', 'worksheet_vars', ctype, imps_vars, system=system)
+            system = self.config.system
+        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets',
+                                          self.cfgset_type, system=system)
+        global_vars = smwflow.variables.read_vars(self.config, 'vars', 'vars',
+                                                  system=system)
+        imps_vars = smwflow.variables.read_vars(self.config, 'imps', 'vars',
+                                                None, global_vars, system=system)
+        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps',
+                                                     'worksheet_vars', self.cfgset_type,
+                                                     imps_vars, system=system)
 
         worksheet = self._render_obj(objs['cray_node_groups_worksheet.yaml'], worksheet_vars)
         data = yaml.load(worksheet)
-        return _simple_worksheet_config(data)
+        return self._simple_worksheet_config(data)
 
 def import_data(config):
     deferred_actions = []
     for repo in ['smwconf', 'secured']:
         repo_path = getattr(config, repo, None)
         if not os.access(repo_path, os.W_OK):
-            print "WARNING: cannot write to %s, skipping %s repo HSS item import" % (repo_path, repo)
+            print "WARNING: cannot write to %s, skipping %s repo HSS item import" % \
+                  (repo_path, repo)
             continue
         repo_imps = os.path.join(repo_path, 'imps')
         try:
             os.mkdir(repo_imps, 0755)
-        except OSError, e:
-            if e.errno != errno.EEXIST:
-                raise e
-        for objtype in ['worksheets','ansible','config', 'dist', 'files']:
+        except OSError, err:
+            if err.errno != errno.EEXIST:
+                raise err
+        for objtype in ['worksheets', 'ansible', 'config', 'dist', 'files']:
             repo_imps = os.path.join(repo_path, 'imps', '%s_%s' % (config.system, objtype))
             try:
                 os.mkdir(repo_imps, 0755)
-            except OSError, e:
-                if e.errno != errno.EEXIST:
-                     raise e
+            except OSError, err:
+                if err.errno != errno.EEXIST:
+                    raise err
 
         manifest = smwflow.manifest.Manifest(repo_imps)
 
@@ -109,14 +150,14 @@ def import_data(config):
             if os.path.exists(item['smwpath']):
                 tgt_path = os.path.join(repo_imps, item['name'])
                 command = ['cp', item['smwpath'], tgt_path]
-                rc = subprocess.call(command)
+                ret = subprocess.call(command)
                 manifest[item['name']] = item
 
         deferred_actions.extend(manifest.save())
         deferred_actions.append("Add/Commit IMPS items in %s" % repo_path)
     return deferred_actions
 
-def _get_smw_dist_preload(config, ctype, cname):
+def _get_smw_dist_preload(config, _, cname):
     smw_files = {}
     dist_path = os.path.join(config.configset_path, cname, 'dist')
     if not os.path.exists(dist_path):
@@ -124,23 +165,23 @@ def _get_smw_dist_preload(config, ctype, cname):
     paths = os.listdir(dist_path)
     for fname in paths:
         path = os.path.join(dist_path, fname)
-        st = os.stat(path)
-        if stat.S_ISREG(st.st_mode) and fname.find('preload') >= 0 and fname.find('cray') < 0:
+        stdata = os.stat(path)
+        if stat.S_ISREG(stdata.st_mode) and fname.find('preload') >= 0 and fname.find('cray') < 0:
             smw_files[fname] = path
     return smw_files
 
-def _get_smw_worksheets(config, ctype, cname, extra):
+def _get_smw_worksheets(config, _, cname, extra):
     smw_worksheets = {}
     managed_smw_worksheets = {}
     cfgset_path = os.path.join(config.configset_path, cname)
-    if not os.path.exists(cfgset_path): 
+    if not os.path.exists(cfgset_path):
         raise ValueError('cfgset %s does not exist' % cfgset_path)
     worksheet_path = os.path.join(cfgset_path, 'worksheets')
     filenames = os.listdir(worksheet_path)
     for filename in filenames:
         path = os.path.join(worksheet_path, filename)
-        st = os.stat(path)
-        if stat.S_ISREG(st.st_mode) and filename.endswith('worksheet.yaml'):
+        stdata = os.stat(path)
+        if stat.S_ISREG(stdata.st_mode) and filename.endswith('worksheet.yaml'):
             smw_worksheets[filename] = {'smwpath': path}
             if filename in extra:
                 for key in extra[filename]:
@@ -151,36 +192,36 @@ def _get_smw_worksheets(config, ctype, cname, extra):
         for key in extra[filename]:
             obj[key] = extra[filename][key]
         managed_smw_worksheets[filename] = obj
-    return smw_worksheets,managed_smw_worksheets
+    return smw_worksheets, managed_smw_worksheets
 
-def _get_smw_configs(config, ctype, cname, extra):
+def _get_smw_configs(config, _, cname, extra):
     smw_configs = {}
     managed_smw_configs = {}
     cfgset_path = os.path.join(config.configset_path, cname)
-    if not os.path.exists(cfgset_path): 
+    if not os.path.exists(cfgset_path):
         raise ValueError('cfgset %s does not exist' % cfgset_path)
     config_path = os.path.join(cfgset_path, 'config')
     filenames = os.listdir(config_path)
     for filename in filenames:
         path = os.path.join(config_path, filename)
-        st = os.stat(path)
-        if not stat.S_ISREG(st.st_mode):
+        stdata = os.stat(path)
+        if not stat.S_ISREG(stdata.st_mode):
             continue
         if filename != 'cray_image_groups.yaml' and filename.startswith('cray_'):
             continue
         if filename in extra:
             for key in extra[filename]:
-                if key not in smw_worksheets[filename]:
+                if key not in smw_configs[filename]:
                     smw_configs[filename][key] = extra[filename][key]
     for filename in extra:
         obj = {'smwpath': os.path.join(config_path, filename)}
         for key in extra[filename]:
             obj[key] = extra[filename][key]
         managed_smw_configs[filename] = obj
-        
+
     return smw_configs, managed_smw_configs
 
-def _render_obj(config, obj, objtype_vars):
+def _render_obj(_, obj, objtype_vars):
     git_data = None
     with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
         data = rfp.read()
@@ -188,7 +229,7 @@ def _render_obj(config, obj, objtype_vars):
         git_data = template.render(objtype_vars)
     return git_data
 
-def _read_smw_obj(config, obj):
+def _read_smw_obj(_, obj):
     smw_data = None
     if 'smwpath' not in obj or not obj['smwpath']:
         print 'unknown smw path for %s' % obj['name']
@@ -213,10 +254,10 @@ def _verify_worksheets(config, imps_vars, ctype, cname):
     common = smw_keys.intersection(git_keys)
     smw_only = smw_keys - git_keys
     git_only = git_keys - smw_keys
-    if len(smw_only) > 0:
+    if smw_only:
         print 'worksheets on smw missing from git: ', smw_only
         print
-    if len(git_only) > 0:
+    if git_only:
         print 'worksheets in git missing from smw: ', git_only
         print
 
@@ -232,13 +273,13 @@ def _verify_worksheets(config, imps_vars, ctype, cname):
             print 'Failed to read git or smw data for imps file %s (smw: %s)' % (key, obj['smwpath'] if 'smwpath' in obj else 'Unknown')
             continue
         issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
-        if len(issues) > 0:
+        if issues:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
             print ""
     for key in managed_smw_cfgset_worksheets:
-        obj = maanged_smw_cfgset_worksheets[key]
+        obj = managed_smw_cfgset_worksheets[key]
         if not smwflow.smwfile.verifyattributes(config, obj):
             print "WARNING: %s has incorrect ownership or file mode" % (obj['smwpath'])
 
@@ -255,26 +296,26 @@ def _verify_dist_preload(config, imps_vars, ctype, cname):
     smw_only = smw_keys - git_keys
     git_only = git_keys - smw_keys
 
-    if len(smw_only) > 0:
+    if smw_only:
         print 'dist files on smw missing from git: ', smw_only
         print
-    if len(git_only) > 0:
+    if git_only:
         print 'dist files in git missing from smw: ', git_only
         print
     for key in common:
         obj = objs[key]
         obj['name'] = key
         print obj
-        smwpath = smw_configs[key]
+        smwpath = smw_dists[key]
 
-        git_data = _render_obj(config, obj, config_vars)
+        git_data = _render_obj(config, obj, dist_vars)
         smw_data = _read_smw_obj(config, obj)
 
         if not git_data or not smw_data:
             print 'Failed to read git or smw data for dist file %s (smw: %s)' % (key, smwpath)
             continue
         issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
-        if len(issues) > 0:
+        if issues:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
@@ -297,10 +338,10 @@ def _verify_configs(config, imps_vars, ctype, cname):
     common = smw_keys.intersection(git_keys)
     smw_only = smw_keys - git_keys
     git_only = git_keys - smw_keys
-    if len(smw_only) > 0:
+    if smw_only:
         print 'config files on smw missing from git: ', smw_only
         print
-    if len(git_only) > 0:
+    if git_only:
         print 'config files in git missing from smw: ', git_only
         print
     for key in common:
@@ -312,10 +353,10 @@ def _verify_configs(config, imps_vars, ctype, cname):
         smw_data = _read_smw_obj(config, obj)
 
         if not git_data or not smw_data:
-            print 'Failed to read git or smw data for worksheet config file %s (smw: %s)' % (key, smwpath)
+            print 'Failed to read git or smw data for worksheet config file %s (smw: %s)' % (key, obj['smwpath'])
             continue
         issues = smwflow.compare.basic_compare(config, obj, git_data, smw_data)
-        if len(issues) > 0:
+        if issues:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
@@ -327,17 +368,17 @@ def _verify_configs(config, imps_vars, ctype, cname):
 
     return deferred_actions
 
-def _verify_ansible(config, imps_vars, ctype, cname):
+def _verify_ansible(config, _, ctype, cname):
     cfgset_ansible_path = os.path.join(config.configset_path, cname, 'ansible')
     cfgset_ansible_path = os.path.realpath(cfgset_ansible_path)
 
     # first, walk the cfgset and build a list of all existing paths
     start_idx = len(cfgset_ansible_path) + 1
     cfgset_ansible = {}
-    for (dirpath, dirnames, filenames) in os.walk(cfgset_ansible_path):
+    for (dirpath, _, filenames) in os.walk(cfgset_ansible_path):
         for path in filenames:
-            relpath =  os.path.join(dirpath, path)[start_idx:]
-            cfgset_ansible[relpath] = { 'match': False, 'checked': False, 'smwpath': os.path.join(dirpath, path) }
+            relpath = os.path.join(dirpath, path)[start_idx:]
+            cfgset_ansible[relpath] = {'match': False, 'checked': False, 'smwpath': os.path.join(dirpath, path)}
 
     # next, walk the repos and discover a list of objects
     objs = smwflow.search.get_objects(config, 'imps', 'ansible', ctype)
@@ -352,11 +393,11 @@ def _verify_ansible(config, imps_vars, ctype, cname):
     gitonly_keys = git_keys - smw_keys
     common_keys = smw_keys.intersection(git_keys)
 
-    if len(smwonly_keys) > 0:
+    if smwonly_keys:
         print "ansible files only on smw: ", smwonly_keys
         print
 
-    if len(gitonly_keys) > 0:
+    if gitonly_keys:
         print  "ansible files only in git: ", gitonly_keys
         print
 
@@ -371,7 +412,7 @@ def _verify_ansible(config, imps_vars, ctype, cname):
         with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
             smw_value = rfp.read()
         issues = smwflow.compare.basic_compare(config, obj, git_value, smw_value)
-        if len(issues) > 0:
+        if issues:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
@@ -379,17 +420,17 @@ def _verify_ansible(config, imps_vars, ctype, cname):
 
     return []
 
-def _verify_files(config, imps_vars, ctype, cname):
+def _verify_files(config, _, ctype, cname):
     cfgset_files_path = os.path.join(config.configset_path, cname, 'files')
     cfgset_files_path = os.path.realpath(cfgset_files_path)
 
     # first, walk the cfgset and build a list of all existing paths
     start_idx = len(cfgset_files_path) + 1
     cfgset_files = {}
-    for (dirpath, dirnames, filenames) in os.walk(cfgset_files_path):
+    for (dirpath, _, filenames) in os.walk(cfgset_files_path):
         for path in filenames:
-            relpath =  os.path.join(dirpath, path)[start_idx:]
-            cfgset_files[relpath] = { 'match': False, 'checked': False, 'smwpath': os.path.join(dirpath, path) }
+            relpath = os.path.join(dirpath, path)[start_idx:]
+            cfgset_files[relpath] = {'match': False, 'checked': False, 'smwpath': os.path.join(dirpath, path)}
 
     # next, walk the repos and discover a list of objects
     objs = smwflow.search.get_objects(config, 'imps', 'files', ctype)
@@ -404,11 +445,11 @@ def _verify_files(config, imps_vars, ctype, cname):
     gitonly_keys = git_keys - smw_keys
     common_keys = smw_keys.intersection(git_keys)
 
-    if len(smwonly_keys) > 0:
+    if smwonly_keys:
         print "files only on smw: ", smwonly_keys
         print
 
-    if len(gitonly_keys) > 0:
+    if gitonly_keys:
         print  "files only in git: ", gitonly_keys
         print
 
@@ -423,7 +464,7 @@ def _verify_files(config, imps_vars, ctype, cname):
         with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
             smw_value = rfp.read()
         issues = smwflow.compare.basic_compare(config, obj, git_value, smw_value)
-        if len(issues) > 0:
+        if issues:
             print "DIFFERENCES FOUND IN %s" % obj['name']
             for item in issues:
                 print item
@@ -431,13 +472,13 @@ def _verify_files(config, imps_vars, ctype, cname):
 
     return []
 
-def _init_cfgset(config, ctype, cname, imps_vars):
+def _init_cfgset(config, ctype, cname, _):
     cfgset_path = os.path.join(config.configset_path, cname)
     if os.path.exists(cfgset_path):
-        print("cfgset path %s already exists" % cfgset_path)
+        print "cfgset path %s already exists" % cfgset_path
         sys.exit(1)
 
-    print("Initializing empty cfgset")
+    print "Initializing empty cfgset"
     retc = 0
     command = [
         "cfgset",
@@ -448,7 +489,7 @@ def _init_cfgset(config, ctype, cname, imps_vars):
     ]
     retc = subprocess.call(command)
     if retc != 0:
-        print("FAILED to init cfgset %s" % cname)
+        print "FAILED to init cfgset %s" % cname
         sys.exit(1)
 
 def verify_data(config):

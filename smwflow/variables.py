@@ -1,5 +1,5 @@
 import os
-import sys
+import yaml
 import smwflow.search
 
 def read_vars(config, maintype, objtype, subtype=None, parentvars=None, system=None):
@@ -18,20 +18,19 @@ def read_vars(config, maintype, objtype, subtype=None, parentvars=None, system=N
                     variables[key] = data[key]
         if os.path.exists(encrypted_vars_path) and os.access(encrypted_vars_path, os.R_OK):
             if not config.vaultobj:
-                print("WARNING: cannot read %s, no usable ansible hash" % encrypted_vars_path)
+                print "WARNING: cannot read %s, no usable ansible hash" % encrypted_vars_path
                 continue
             with open(encrypted_vars_path, 'r') as rfp:
                 try:
                     data = yaml.load(config.vaultobj.decrypt(rfp.read()))
                 except:
-                    print("Cannot decrypt variables in %s; skipping" % encrypted_vars_path)
+                    print "Cannot decrypt variables in %s; skipping" % encrypted_vars_path
                     continue
                 for key in data:
                     variables[key] = data[key]
     if parentvars:
         for key in parentvars:
             if key not in variables:
-                variabels[key] = parentvars[key]
+                variables[key] = parentvars[key]
 
     return variables
-

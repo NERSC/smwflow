@@ -1,7 +1,6 @@
 import os
-import sys
-import yaml
 import copy
+import yaml
 
 class Manifest(object):
     def __init__(self, path):
@@ -15,8 +14,8 @@ class Manifest(object):
         fname = os.path.join(self.path, '.smwflow.manifest.yaml')
         if not os.path.exists(fname):
             return
-        with open(fname, 'r') as fp:
-            self.__orig__ = yaml.load(fp.read())
+        with open(fname, 'r') as rfp:
+            self.__orig__ = yaml.load(rfp.read())
         self.__curr__ = copy.deepcopy(self.__orig__)
 
     def save(self):
@@ -25,8 +24,8 @@ class Manifest(object):
         else:
             print "manifest altered"
         fname = os.path.join(self.path, '.smwflow.manifest.yaml')
-        with open(fname, 'w') as fp:
-            fp.write(yaml.dump(self.__curr__))
+        with open(fname, 'w') as wfp:
+            wfp.write(yaml.dump(self.__curr__))
         return []
 
     def __getitem__(self, key):
@@ -49,4 +48,3 @@ class Manifest(object):
 
     def __repr__(self):
         return "Manifest for %s: %s" % (self.path, repr(self.__curr__))
-
