@@ -7,13 +7,13 @@ import smwflow.hss as hss
 import smwflow.imps as imps
 import smwflow.cfgset as cfgset
 
-def _get_git_head_rev(path):
+def get_git_head_rev(path):
     command = ["git", "-C", path, "rev-parse", "HEAD"]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
     stdout, _ = proc.communicate()
     return stdout.strip()
 
-def _get_git_branch(path):
+def get_git_branch(path):
     command = ["git", "-C", path, "status", "-s", "--porcelain", "-b", "-u", "no"]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE)
     stdout, _ = proc.communicate()
@@ -60,18 +60,18 @@ def do_status(config):
     smwconf_branch = "Unknown (inaccessible)"
     smwconf_head = "Unknown (inaccessible)"
     if os.access(config.smwconf, os.R_OK):
-        smwconf_branch = _get_git_branch(config.smwconf)
-        smwconf_head = _get_git_head_rev(config.smwconf)
+        smwconf_branch = get_git_branch(config.smwconf)
+        smwconf_head = get_git_head_rev(config.smwconf)
     secured_branch = "Unknown (inaccessible)"
     secured_head = "Unknown (inaccessible)"
     if os.access(config.secured, os.R_OK):
-        secured_branch = _get_git_branch(config.secured)
-        secured_head = _get_git_head_rev(config.secured)
+        secured_branch = get_git_branch(config.secured)
+        secured_head = get_git_head_rev(config.secured)
     zypper_branch = "Unknown (inaccessible)"
     zypper_head = "Unknown (inaccessible)"
     if os.access(config.zypper, os.R_OK):
-        zypper_branch = _get_git_branch(config.zypper)
-        zypper_head = _get_git_head_rev(config.zypper)
+        zypper_branch = get_git_branch(config.zypper)
+        zypper_head = get_git_head_rev(config.zypper)
     print "smwconf repo  : %s" % config.smwconf
     print "smwconf branch: %s" % smwconf_branch
     print "smwconf HEAD  : %s" % smwconf_head
@@ -123,6 +123,8 @@ def do_update(config):
         deferred_actions.extend(hss.update_data(config))
     if config.update_imps:
         deferred_actions.extend(imps.update_data(config))
+    if config.update_cfgset:
+        deferred_actions.extend(cfgset.update_data(config))
     return deferred_actions
 
 def do_create(config):
