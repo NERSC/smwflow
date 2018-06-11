@@ -43,8 +43,11 @@ def _read_smw_obj(obj):
         print 'file does not exist for %s at %s' % (obj['name'], obj['smwpath'])
         return None
 
-    with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
-        smw_data = rfp.read()
+    try:
+        with codecs.open(obj['smwpath'], mode='r', encoding='utf-8') as rfp:
+            smw_data = rfp.read()
+    except IOError:
+        pass
     return smw_data
 
 def _basic_verify(git_objs, smw_objs):
@@ -243,7 +246,7 @@ class ConfigSet(object):
         filenames = os.listdir(obj_path)
         for filename in filenames:
             path = os.path.join(obj_path, filename)
-            if filter_fxn(self, path):
+            if filter_fxn(path):
                 smw_files[filename] = {'smwpath': path}
                 if extra and filename in extra:
                     for key in extra[filename]:
@@ -328,7 +331,7 @@ class ConfigSet(object):
     def _verify_template_objs(self, obj_type, filter_fxn, extra):
 
         smw_objs, managed_smw_objs = self._get_smw_objects(obj_type, filter_fxn, extra)
-        git_objs, = smwflow.search.get_objects(self.config, 'imps', obj_type, self.cfgset_type)
+        git_objs = smwflow.search.get_objects(self.config, 'imps', obj_type, self.cfgset_type)
         local_vars = smwflow.variables.read_vars(self.config, 'imps',
                                                  '%s_vars' % obj_type, self.cfgset_type,
                                                  self.parent_vars)
@@ -345,10 +348,13 @@ class ConfigSet(object):
             git_data = _render_obj(obj, local_vars)
             smw_data = _read_smw_obj(obj)
 
-            tmp = smwflow.compare.basic_compare(self.config, obj, git_data, smw_data)
-            if tmp:
-                ret['value_diff'][key] = tmp
-                ret['differences'] += len(tmp)
+            if git_data and smw_data:
+                tmp = smwflow.compare.basic_compare(self.config, obj, git_data, smw_data)
+                if tmp:
+                    ret['value_diff'][key] = tmp
+                    ret['differences'] += len(tmp)
+            else:
+                print "WARNING skipping verification of %s" % key
 
             if not smwflow.smwfile.verifyattributes(self.config, obj):
                 ret['permissions'].append(obj['smwpath'])
@@ -376,13 +382,24 @@ class ConfigSet(object):
         for key in common_keys:
             obj = git_objs[key]
             obj['smwpath'] = smw_objs[key]['smwpath']
+            obj['name'] = key
             smw_value = None
             git_value = None
 
-            with codecs.open(git_objs[key]['fullpath'], mode='r', encoding='utf-8') as rfp:
-                git_value = rfp.read()
-            with codecs.open(git_objs[key]['smwpath'], mode='r', encoding='utf-8') as rfp:
-                smw_value = rfp.read()
+            try:
+                with codecs.open(git_objs[key]['fullpath'], mode='r', encoding='utf-8') as rfp:
+                    git_value = rfp.read()
+            except UnicodeDecodeError:
+                ## TODO, handle this error properly (i.e., switch md5sum or whatever)
+                continue
+
+            try:
+                with codecs.open(git_objs[key]['smwpath'], mode='r', encoding='utf-8') as rfp:
+                    smw_value = rfp.read()
+            except IOError:
+                print "WARNING: skipping %s" % key
+                continue
+            print git_objs[key]['fullpath'], git_objs[key]['smwpath']
             tmp = smwflow.compare.basic_compare(self.config, obj, git_value, smw_value)
             if tmp:
                 ret['value_diff'][key] = tmp
@@ -597,6 +614,7 @@ class ConfigSet(object):
         return retc + diffs['differences']
 
     def display_diffs(self, diffs):
+        print diffs
         pass
 
 def verify_data(config):
@@ -615,8 +633,7 @@ def verify_data(config):
         return []
     configset = ConfigSet(config, config.cfgset_type, config.cfgset_name, imps_vars)
     diffs = configset.verify()
-    if diffs['differences'] > 0:
-        configset.display_diffs(cle_diffs)
+    configset.display_diffs(diffs)
     return []
 
 def create(config):
