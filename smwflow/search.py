@@ -55,7 +55,7 @@ def get_objects(config, maintype, objtype, subtype=None, extra_obj_parameters=No
                 if filename == '.smwflow.manifest.yaml':
                     continue
                 filename = os.path.join(dirpath, filename)[start_idx:]
-                output[filename] = {'fullpath': os.path.join(dirpath, filename)}
+                output[filename] = {'fullpath': os.path.join(rpath, filename)}
                 if filename in manifest:
                     for key in manifest[filename]:
                         output[filename][key] = manifest[filename][key]
