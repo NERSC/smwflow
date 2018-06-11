@@ -57,7 +57,7 @@ class ArgConfig(object):
         if not config.password_file:
             config.password_file = os.path.join(config.secured, 'ansible_vault/ansible.hash')
         if os.path.exists(config.password_file):
-            with open(config['password_file'], 'r') as rfp:
+            with open(config.password_file, 'r') as rfp:
                 password = rfp.read().strip()
                 vaultobj = vault.VaultLib(password)
                 setattr(self.values, 'vaultobj', vaultobj)
@@ -78,6 +78,8 @@ class ArgConfig(object):
                             help='root path to config sets')
         parser.add_argument('--password_file', default=config.password_file,
                             help='Ansible vault password file')
+        parser.add_argument('--partition', default=config.partition,
+                            help='XC partition for configuration')
         self.subparsers = parser.add_subparsers(help='smwflow command')
 
         self._setup_status_parser()
