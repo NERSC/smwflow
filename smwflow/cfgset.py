@@ -11,11 +11,13 @@ import socket
 from jinja2 import Template
 import yaml
 import rsm.hss
+import smwflow
 import smwflow.compare
 import smwflow.manifest
 import smwflow.search
 import smwflow.smwfile
 import smwflow.variables
+import smwflow.plugin
 
 
 MANAGED_CFGSET_WORKSHEET = {
@@ -28,6 +30,9 @@ MANAGED_CFGSET_CONFIG = {
 
 def _render_obj(obj, objtype_vars):
     git_data = None
+    if 'git_data' in obj:
+        return obj['git_data']
+
     with codecs.open(obj['fullpath'], mode='r', encoding='utf-8') as rfp:
         data = rfp.read()
         template = Template(data)
@@ -36,6 +41,9 @@ def _render_obj(obj, objtype_vars):
 
 def _read_smw_obj(obj):
     smw_data = None
+    if 'smw_data' in obj:
+        return obj['smw_data']
+
     if 'smwpath' not in obj or not obj['smwpath']:
         print 'unknown smw path for %s' % obj['name']
         return None
@@ -162,6 +170,22 @@ class ConfigSet(object):
         for node in routermap:
             self.routermap[node.cname] = node
 
+        # initialize our plugins
+        self.plugins = {}
+        for basetype in ['ansible', 'files']:
+            plugins = smwflow.plugin.get_plugins(self.config, 'imps', basetype,
+                                                 self.cfgset_type,
+                                                 system=self.config.system)
+            for plugin in plugins:
+                obj = plugin(config, self)
+                objtype = getattr(obj, 'objtype')
+                if objtype:
+                    if objtype not in self.plugins:
+                        self.plugins[objtype] = []
+                    if obj not in self.plugins[objtype]:
+                        self.plugins[objtype].append(obj)
+
+
     def smwimport(self):
         pass
 
@@ -217,23 +241,6 @@ class ConfigSet(object):
 
         net_worksheet = _render_obj(objs['cray_net_worksheet.yaml'], worksheet_vars)
         data = yaml.load(net_worksheet)
-        return __simple_worksheet_config(data)
-
-    def parse_nodegroups(self, system=None):
-        if not system:
-            system = self.config.system
-        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets',
-                                          self.cfgset_type, system=system)
-        global_vars = smwflow.variables.read_vars(self.config, 'vars', 'vars',
-                                                  system=system)
-        imps_vars = smwflow.variables.read_vars(self.config, 'imps', 'vars',
-                                                None, global_vars, system=system)
-        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps',
-                                                     'worksheet_vars', self.cfgset_type,
-                                                     imps_vars, system=system)
-
-        worksheet = _render_obj(objs['cray_node_groups_worksheet.yaml'], worksheet_vars)
-        data = yaml.load(worksheet)
         return __simple_worksheet_config(data)
 
     def _get_smw_objects(self, obj_type, filter_fxn, extra):
@@ -308,19 +315,49 @@ class ConfigSet(object):
                 }
         return cfgset_objs
 
+    def _get_plugin_objs(self, obj_type, git_objs, smw_objs, local_vars):
+        count = 0
+        if obj_type not in self.plugins:
+            return 0
+
+        for plugin in self.plugins[obj_type]:
+            pobjs = plugin.get_objects()
+            for objname in pobjs:
+                obj = pobjs[objname]
+
+                git_data = plugin.get_git_object(obj)
+                if git_data:
+                    if plugin.is_templated():
+                        template = Template(git_data)
+                        git_data = template.render(local_vars)
+                    if objname not in git_objs:
+                        git_objs[objname] = {"name": objname}
+                    git_objs[objname]['git_data'] = git_data
+
+                smw_data = plugin.get_smw_object(obj)
+                smw_path = plugin.get_smw_path(obj)
+
+                if smw_data or smw_path:
+                    smw_objs[objname] = {"name": objname}
+                if smw_data:
+                    smw_objs[objname]['smw_data'] = smw_data
+                if smw_path:
+                    smw_objs[objname]['smw_path'] = smw_path
+                count += 1
+        return count
+
     def _get_template_objs(self, obj_type, extra):
-        git_objs, = smwflow.search.get_objects(self.config, 'imps', obj_type, self.cfgset_type)
+        git_objs = smwflow.search.get_objects(self.config, 'imps', obj_type, self.cfgset_type)
         local_vars = smwflow.variables.read_vars(self.config, 'imps',
                                                  '%s_vars' % obj_type, self.cfgset_type,
                                                  self.parent_vars)
-        # execute any discovered ansible smwflow plugins, generate content in-memory
-        ## # TODO
 
+        self._get_plugin_objs(obj_type, git_objs, None, local_vars)
         for filename in git_objs:
             obj = git_objs[filename]
             obj['name'] = filename
-            if 'data' not in obj:
-                obj['data'] = _render_obj(obj, local_vars)
+            if 'git_data' not in obj:
+                obj['git_data'] = _render_obj(obj, local_vars)
             if extra and filename in extra:
                 for key in extra[filename]:
                     if key not in obj:
@@ -336,8 +373,7 @@ class ConfigSet(object):
                                                  '%s_vars' % obj_type, self.cfgset_type,
                                                  self.parent_vars)
 
-        # execute any discovered ansible smwflow plugins, generate content in-memory
-        ## # TODO
+        self._get_plugin_objs(obj_type, git_objs, local_vars)
         ret, common_keys = _basic_verify(git_objs, smw_objs)
 
         for key in common_keys:
@@ -374,9 +410,7 @@ class ConfigSet(object):
         smw_objs = self._get_smw_obj_filetree(obj_type, filter_fxn)
         git_objs = smwflow.search.get_objects(self.config, 'imps', obj_type, self.cfgset_type)
 
-        # execute any discovered ansible smwflow plugins, generate content in-memory
-        ## TODO
-
+        self._get_plugin_objs(obj_type, git_objs, None)
         ret, common_keys = _basic_verify(git_objs, smw_objs)
 
         for key in common_keys:
@@ -454,7 +488,7 @@ class ConfigSet(object):
         for key in worksheets:
             wpath = os.path.join(worksheets_tmp, key)
             with open(wpath, 'w') as wfp:
-                wfp.write(worksheets[key]['data'])
+                wfp.write(worksheets[key]['git_data'])
 
         print "Updating cfgset with worksheets"
         command = [
@@ -491,7 +525,7 @@ class ConfigSet(object):
             wpath = os.path.join(cfgset_obj_root, key)
             objs[key]['smwpath'] = wpath
             with open(wpath, 'w') as wfp:
-                wfp.write(objs[key]['data'])
+                wfp.write(objs[key]['git_data'])
             smwflow.smwfile.setattributes(self.config, objs[key])
         return 0
 
@@ -507,8 +541,8 @@ class ConfigSet(object):
         local_vars = smwflow.variables.read_vars(self.config, 'imps',
                                                  '%s_vars' % obj_type, self.cfgset_type,
                                                  self.parent_vars)
-        # execute any discovered ansible smwflow plugins, generate content in-memory
-        ## # TODO
+
+        self._get_plugin_objs(obj_type, git_objs, local_vars)
 
         ftree_root = os.path.join(self.config.configset_path, self.cfgset_name, obj_type)
 
@@ -615,7 +649,118 @@ class ConfigSet(object):
 
     def display_diffs(self, diffs):
         print diffs
-        pass
+
+class Plugin(object):
+    def __init__(self, config, cfgset, objtype):
+        self.config = config
+        self.cfgset = cfgset
+        self.objtype = objtype
+        if objtype not in self.cfgset.plugins:
+            self.cfgset.plugins[objtype] = list()
+        self.cfgset.plugins[objtype].append(self)
+
+    def get_objects(self):
+        return None
+
+    def get_smw_object(self, obj):
+        return None
+
+    def get_smw_path(self, obj):
+        return None
+
+    def get_git_object(self, obj):
+        return None
+
+    def is_templated(self):
+        return False
+
+class Nodegroups(object):
+    def __init__(self, config, system=None):
+        if not config:
+            raise ValueError('config cannot be undefined')
+
+        self.config = config
+        self.nodegroups = None
+        self.network = None
+        self.data = self._parse_nodegroups(system)
+
+
+    def _parse_nodegroups(self, system=None):
+        if not system:
+            system = self.config.system
+
+        objs = smwflow.search.get_objects(self.config, 'imps', 'worksheets', 'cle', system=system)
+        global_vars = smwflow.variables.read_vars(self.config, 'vars', 'vars', system=system)
+        imps_vars = smwflow.variables.read_vars(self.config, 'imps', 'vars',
+                                                None, global_vars, system=system)
+        worksheet_vars = smwflow.variables.read_vars(self.config, 'imps',
+                                                     'worksheet_vars', 'cle',
+                                                     imps_vars, system=system)
+
+        worksheet = _render_obj(objs['cray_node_groups_worksheet.yaml'], worksheet_vars)
+        data = yaml.load(worksheet)
+        data = __simple_worksheet_config(data)
+        if not data:
+            raise ValueError('Failed to find or parse cray_node_groups_worksheet')
+        self.nodegroups = data
+
+        worksheet = _render_obj(objs['cray_net_worksheet.yaml'], worksheet_vars)
+        data = yaml.load(worksheet)
+        data = __simple_worksheet_config(data)
+        if not data:
+            raise ValueError('Failed to find or parse cray_net_worksheet')
+        self.network = data
+
+    def get_rawnames_in_nodegroup(self, nodegroup):
+        members = []
+        try:
+            members = self.nodegroups['cray_node_groups']['settings']['groups'] \
+                                     ['data'][nodegroup]['members']
+        except KeyError:
+            return []
+        return members
+
+    def get_hosts_in_nodegroup(self, nodegroup):
+        """Identify and resolve logical node names in a specified nodegroup.
+
+            Assuming the cray_net configuration uses the logical node name for
+            all hosts, translate all the members of a nodegroup into the logical
+            names.
+
+            Args:
+                self (Nodegroup): reference to current Nodegroups instance
+                nodegroup (string): name of nodegroup of interest
+
+            Returns:
+                list of strings representing the resolved logical hostnames of
+                all members in the nodegroup.
+
+            Raises:
+                ValueError when any members of a nodegroup could not be resolved.
+        """
+        hostmap = {}
+        members = self.get_rawnames_in_nodegroup(nodegroup)
+        if not members:
+            return []
+
+        for hostkey in self.network['cray_net']['settings']['hosts']['data']:
+            host = self.network['cray_net']['settings']['hosts']['data'][hostkey]
+            if 'hostname' not in host:
+                continue
+
+            for member in members:
+                if 'hostid' in host and host['hostid'] == member:
+                    hostmap[member] = host
+                if hostkey == member:
+                    hostmap[member] = host
+        memset = set(members)
+        hostset = set(hostmap.keys())
+        missing = memset - hostset
+        if missing:
+            raise ValueError('Following %s members could not be identified in cray_net: %s'
+                             % (nodegroup, ', '.join(missing)))
+
+        return hostmap.values()
 
 def verify_data(config):
     imps_vars = smwflow.variables.read_vars(config, 'imps', 'vars', None, config.global_vars)
