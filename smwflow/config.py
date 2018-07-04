@@ -1,3 +1,10 @@
+"""
+smwflow.config
+
+smwflow configuration file and argument parsers to generate configurations
+used throughout the other smwflow modules.
+"""
+
 import os
 import argparse
 import ConfigParser
@@ -8,8 +15,17 @@ import smwflow
 import smwflow.search
 import smwflow.variables
 
-class Config(object):
+class BaseConfig(dict):
+    """Class representing the smwflow configuration fileself.
+
+    The smwflow configuration file contains base configurations and paths, most
+    of which can be overridden on the command line, but is used by the administrator
+    or user to provide reasonable defaults for their development environment.
+    """
+
     def __init__(self):
+        super(BaseConfig, self).__init__()
+
         system = None
         if os.path.exists('/etc/clustername'):
             with open('/etc/clustername') as rfp:
@@ -29,14 +45,14 @@ class Config(object):
         config_fname = '%s/smwflow.conf' % smwflow.CONFIG_PATH
         parser = ConfigParser.SafeConfigParser(defaults)
         parser.read([config_fname, os.path.expanduser('~/.smwflow.conf')])
-        self.smwconf = parser.get('smwflow', 'smwconf')
-        self.secured = parser.get('smwflow', 'secured')
-        self.zypper = parser.get('smwflow', 'zypper')
-        self.system = parser.get('smwflow', 'system')
-        self.password_file = parser.get('smwflow', 'password_file')
-        self.configset_path = parser.get('smwflow', 'configset_path')
-        self.partition = parser.get('smwflow', 'partition')
-        self.platform_json = parser.get('smwflow', 'platform_json')
+        self['smwconf'] = parser.get('smwflow', 'smwconf')
+        self['secured'] = parser.get('smwflow', 'secured')
+        self['zypper'] = parser.get('smwflow', 'zypper')
+        self['system'] = parser.get('smwflow', 'system')
+        self['password_file'] = parser.get('smwflow', 'password_file')
+        self['configset_path'] = parser.get('smwflow', 'configset_path')
+        self['partition'] = parser.get('smwflow', 'partition')
+        self['platform_json'] = parser.get('smwflow', 'platform_json')
 
 class ArgCheckoutBranchAction(argparse.Action):
     def __init__(self, option_strings, dest, nargs=None, **kwargs):
@@ -51,34 +67,69 @@ class ArgCheckoutBranchAction(argparse.Action):
             setattr(namespace, 'zypper_branch', values)
 
 class ArgConfig(object):
+    """Class merging user-provided and BaseConfig values for the instance configuration.
+
+    Uses argparse extensively to intepret user desires for each mode of operation.
+    The resulting configuration is used by smwflow.process and all other smwflow
+    modules to carry out any and all actions smwflow is capable of taking.
+    """
     def __init__(self, config, argv):
+        super(ArgConfig, self).__init__()
         self.parser = self.__get_parser(config)
         self.values = self.parser.parse_args(argv)
-        if not config.password_file:
-            config.password_file = os.path.join(config.secured, 'ansible_vault/ansible.hash')
-        if os.path.exists(config.password_file):
-            with open(config.password_file, 'r') as rfp:
+        if not config['password_file']:
+            config['password_file'] = os.path.join(config['secured'], 'ansible_vault/ansible.hash')
+        if os.path.exists(config['password_file']):
+            with open(config['password_file'], 'r') as rfp:
                 password = rfp.read().strip()
                 vaultobj = vault.VaultLib(password)
                 setattr(self.values, 'vaultobj', vaultobj)
+        print self.values
         variables = smwflow.variables.read_vars(self.values, 'vars', 'vars')
         setattr(self.values, "global_vars", variables)
 
+    def parse_platform(self):
+        """Reads p0.platform.json and generates a dictionary mapping the platform
+           name to its constituent host cnames.
+
+        Assumes that each platform key begins with "platform:" and each value
+        is a list of cnames.
+
+        TODO: consider using rsm.node_groups.resolvers.cle instead
+        """
+
+        platform_json = self.values.platform_json
+        if not platform_json:
+            filename = '%s.platform.json' % self.values.partition
+            platform_json = os.path.join(self.values.configset_path,
+                                         'global/files/node_groups/platforms',
+                                         filename)
+
+        with codecs.open(platform_json, mode='r', encoding='utf-8') as rfp:
+            platform = json.load(rfp)
+
+        platform = {}
+        for p_name, p_nodes in platform.items():
+            if p_name.startswith('platform:'):
+                platform[p_name] = [p_node for p_node in p_nodes]
+
+        return platform
+
     def __get_parser(self, config):
         parser = argparse.ArgumentParser(description='smwflow git-based Cray systems management')
-        parser.add_argument('--smwconf', default=config.smwconf,
+        parser.add_argument('--smwconf', default=config['smwconf'],
                             help='path to the primary smw configuration git repo')
-        parser.add_argument('--secured', default=config.secured,
+        parser.add_argument('--secured', default=config['secured'],
                             help='path to the secured smw configuration git repo')
-        parser.add_argument('--zypper', default=config.zypper,
+        parser.add_argument('--zypper', default=config['zypper'],
                             help='path to zypper git-lfs repo')
-        parser.add_argument('--system', default=config.system,
+        parser.add_argument('--system', default=config['system'],
                             help='system name')
-        parser.add_argument('--configset_path', default=config.configset_path,
+        parser.add_argument('--configset_path', default=config['configset_path'],
                             help='root path to config sets')
-        parser.add_argument('--password_file', default=config.password_file,
+        parser.add_argument('--password_file', default=config['password_file'],
                             help='Ansible vault password file')
-        parser.add_argument('--partition', default=config.partition,
+        parser.add_argument('--partition', default=config['partition'],
                             help='XC partition for configuration')
         self.subparsers = parser.add_subparsers(help='smwflow command')
 
@@ -225,30 +276,3 @@ class ArgConfig(object):
                                      default='cle', dest='cfgset_type')
         p_import_cfgset.add_argument('cfgset_name', help='configset name')
         return p_import
-
-def parse_platform(config):
-    '''Reads p0.platform.json and generates a dictionary mapping the platform
-       name to its constituent host cnames.
-
-       Assumes that each platform key begins with "platform:" and each value
-       is a list of cnames.
-
-       TODO: consider using rsm.node_groups.resolvers.cle instead
-       '''
-
-    platform_json = config.platform_json
-    if not platform_json:
-        filename = '%s.platform.json' % config.partition
-        platform_json = os.path.join(config.configset_path,
-                                     'global/files/node_groups/platforms',
-                                     filename)
-
-    with codecs.open(platform_json, mode='r', encoding='utf-8') as rfp:
-        platform = json.load(rfp)
-
-    platform = {}
-    for p_name, p_nodes in platform.items():
-        if p_name.startswith('platform:'):
-            platform[p_name] = [p_node for p_node in p_nodes]
-
-    return platform
