@@ -1,4 +1,5 @@
 import os
+import smwflow
 import smwflow.manifest
 
 def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf', 'secured'), system=None):
@@ -12,6 +13,8 @@ def gen_paths(config, maintype, objtype, subtype=None, repos=('smwconf', 'secure
     """
     if not system:
         system = config.system
+    if not system:
+        raise ValueError('system undefined')
 
     gentype_arr = []
     systype_arr = [system]
@@ -55,7 +58,7 @@ def get_objects(config, maintype, objtype, subtype=None, extra_obj_parameters=No
                 if filename == '.smwflow.manifest.yaml':
                     continue
                 filename = os.path.join(dirpath, filename)[start_idx:]
-                output[filename] = {'fullpath': os.path.join(rpath, filename)}
+                output[filename] = smwflow.SmwflowObject(name=filename, fullpath=os.path.join(rpath, filename))
                 if filename in manifest:
                     for key in manifest[filename]:
                         output[filename][key] = manifest[filename][key]
